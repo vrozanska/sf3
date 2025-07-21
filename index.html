@@ -47,6 +47,7 @@
         <header class="text-center mb-8 md:mb-12">
             <h1 class="text-4xl md:text-5xl font-bold text-gray-800 mb-2">🌉 SF Gems & Trails 🌲</h1>
             <p class="text-lg text-gray-600 max-w-3xl mx-auto">Welcome! This is our team's living map of cherished spots in and around San Francisco. Explore contributions or add your own favorite discovery.</p>
+            <p id="user-id-display" class="text-xs text-gray-400 mt-2">Loading user ID...</p>
         </header>
 
         <div class="flex flex-col md:flex-row justify-between items-center mb-8">
@@ -65,6 +66,7 @@
         </div>
 
         <main id="spots-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div id="loading-indicator" class="md:col-span-3 text-center text-gray-500 py-16 hidden">Loading spots...</div>
         </main>
     </div>
 
@@ -74,7 +76,7 @@
             <button id="close-modal-btn" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
             </button>
-            <h2 class="text-2xl font-bold mb-6 text-gray-800">Add Your Favorite Spot</h2>
+            <h2 id="modal-title" class="text-2xl font-bold mb-6 text-gray-800">Add Your Favorite Spot</h2>
             <form id="spot-form" class="space-y-4">
                 <div>
                     <label for="spot-name" class="block text-sm font-medium text-gray-700">Name of Spot/Trail</label>
@@ -108,7 +110,7 @@
                     <input type="text" id="spot-submitter" name="spotSubmitter" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" required>
                 </div>
                 <div class="pt-4">
-                    <button type="submit" class="w-full btn bg-[#5A67D8] hover:bg-[#434190] text-white font-bold py-3 px-4 rounded-lg shadow-md">
+                    <button type="submit" id="submit-spot-btn" class="w-full btn bg-[#5A67D8] hover:bg-[#434190] text-white font-bold py-3 px-4 rounded-lg shadow-md">
                         Submit Spot
                     </button>
                 </div>
@@ -116,129 +118,214 @@
         </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const spotsGrid = document.getElementById('spots-grid');
-            const addSpotBtn = document.getElementById('add-spot-btn');
-            const modal = document.getElementById('add-spot-modal');
-            const closeModalBtn = document.getElementById('close-modal-btn');
-            const modalBackdrop = document.querySelector('.modal-backdrop');
-            const spotForm = document.getElementById('spot-form');
-            const filterContainer = document.getElementById('filter-container');
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, orderBy, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-            let spotsData = [
-                {
-                    name: 'Cafe Aquatica',
-                    location: 'Jenner, CA (Sonoma Coast)',
-                    category: '☕ Cafe/Restaurant',
-                    love: 'A whisper of a cafe, perched where the Russian River kisses the Pacific. The scent of coffee dances with salty air, and live music harmonizes with the ocean\'s lullaby. A serene communion with nature.',
-                    tip: 'Go on a weekday afternoon to get a good seat on the deck. The gluten-free pastries are surprisingly amazing!',
-                    submitter: 'Team Lead'
-                },
-                {
-                    name: 'The Presidio National Park',
-                    location: 'The Presidio',
-                    category: '🏞️ Park/Viewpoint',
-                    love: 'A massive urban forest escape with stunning views of the Golden Gate Bridge, Alcatraz, and the bay. There\'s a trail for every mood, and the Yoda fountain is a fun surprise!',
-                    tip: 'Start near the Warming Hut for a casual bayfront stroll, or head up to Lovers\' Lane for a serene redwood forest walk. Dress in layers!',
-                    submitter: 'HR'
-                },
-                {
-                    name: 'Golden Boy Pizza',
-                    location: 'North Beach',
-                    category: '☕ Cafe/Restaurant',
-                    love: 'This isn\'t your typical SF sourdough pizza. It\'s a no-frills, cash-only spot serving thick, rectangular, focaccia-style slices that are just heavenly. The cheese is crispy at the edges and the sauce is perfect.',
-                    tip: 'It\'s tiny and there\'s always a line, but it moves fast. Get the clam and garlic slice if you\'re feeling adventurous!',
-                    submitter: 'DK'
-                },
-                 {
-                    name: 'Mount Davidson',
-                    location: 'Miraloma Park',
-                    category: '🚶‍♂️ Hiking Trail',
-                    love: 'The highest natural point in San Francisco. It\'s a short, easy hike up through a misty, magical-feeling forest that opens up to incredible panoramic views of the city. Feels like a secret.',
-                    tip: 'Much less crowded than Twin Peaks. Perfect for a quick morning hike to clear your head. Can be muddy after rain.',
-                    submitter: 'AJ'
-                }
-            ];
+        setLogLevel('Debug');
 
-            const renderSpots = (filter = 'All') => {
-                spotsGrid.innerHTML = '';
-                const filteredSpots = filter === 'All' ? spotsData : spotsData.filter(spot => spot.category === filter);
+        let app;
+        let db;
+        let auth;
+        let userId;
+        let spotsData = [];
+        let currentFilter = 'All';
+        let editingSpotId = null;
 
-                if (filteredSpots.length === 0) {
-                    spotsGrid.innerHTML = `<div class="md:col-span-2 lg:col-span-3 text-center text-gray-500 py-16">
-                        <p class="text-xl">No spots found for this category yet.</p>
-                        <p>Be the first to add one!</p>
-                    </div>`;
-                    return;
-                }
+        const spotsGrid = document.getElementById('spots-grid');
+        const addSpotBtn = document.getElementById('add-spot-btn');
+        const modal = document.getElementById('add-spot-modal');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const modalBackdrop = document.querySelector('.modal-backdrop');
+        const spotForm = document.getElementById('spot-form');
+        const filterContainer = document.getElementById('filter-container');
+        const modalTitle = document.getElementById('modal-title');
+        const submitSpotBtn = document.getElementById('submit-spot-btn');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const userIdDisplay = document.getElementById('user-id-display');
 
-                filteredSpots.forEach(spot => {
-                    const card = document.createElement('div');
-                    card.className = 'card rounded-lg shadow-sm p-6 flex flex-col';
-                    card.innerHTML = `
-                        <div class="flex-grow">
-                            <span class="inline-block bg-gray-100 text-gray-700 text-xs font-semibold px-2.5 py-1 rounded-full mb-3">${spot.category}</span>
-                            <h3 class="text-xl font-bold text-gray-800 mb-2">${spot.name}</h3>
-                            <p class="text-sm font-medium text-[#D48C70] mb-4">${spot.location}</p>
-                            <p class="text-gray-600 mb-4 leading-relaxed">"${spot.love}"</p>
-                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-                                <strong class="font-semibold text-blue-800">Pro Tip:</strong>
-                                <span class="text-blue-700">${spot.tip}</span>
-                            </div>
-                        </div>
-                        <div class="mt-6 pt-4 border-t border-gray-200 text-right">
-                            <p class="text-xs text-gray-500">Submitted by: <strong class="font-medium">${spot.submitter}</strong></p>
-                        </div>
-                    `;
-                    spotsGrid.appendChild(card);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        const collectionPath = `artifacts/${appId}/public/data/sfGems`;
+
+        const initializeFirebase = async () => {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userIdDisplay.textContent = `Your User ID: ${userId}`;
+                        setupFirestoreListener();
+                    } else {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined') {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (error) {
+                            console.error("Firebase Auth error:", error);
+                            userIdDisplay.textContent = `Authentication failed: ${error.message}`;
+                        }
+                    }
                 });
-            };
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                userIdDisplay.textContent = `Firebase init failed: ${error.message}`;
+            }
+        };
 
-            const toggleModal = (show) => {
-                if (show) {
-                    modal.classList.remove('hidden');
-                    modal.classList.add('flex');
-                } else {
-                    modal.classList.add('hidden');
-                    modal.classList.remove('flex');
-                }
-            };
-            
-            addSpotBtn.addEventListener('click', () => toggleModal(true));
-            closeModalBtn.addEventListener('click', () => toggleModal(false));
-            modalBackdrop.addEventListener('click', () => toggleModal(false));
-            
-            spotForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const formData = new FormData(spotForm);
-                const newSpot = {
-                    name: formData.get('spotName'),
-                    location: formData.get('spotLocation'),
-                    category: formData.get('spotCategory'),
-                    love: formData.get('spotLove'),
-                    tip: formData.get('spotTip'),
-                    submitter: formData.get('spotSubmitter')
-                };
-                spotsData.unshift(newSpot); 
-                spotForm.reset();
-                toggleModal(false);
-                
-                const currentFilter = document.querySelector('.filter-btn.active').dataset.category;
+        const setupFirestoreListener = () => {
+            loadingIndicator.classList.remove('hidden');
+            const q = collection(db, collectionPath);
+            onSnapshot(q, (snapshot) => {
+                spotsData = [];
+                snapshot.forEach((doc) => {
+                    spotsData.push({ id: doc.id, ...doc.data() });
+                });
+                loadingIndicator.classList.add('hidden');
                 renderSpots(currentFilter);
+            }, (error) => {
+                console.error("Error fetching documents:", error);
+                spotsGrid.innerHTML = `<div class="md:col-span-3 text-center text-red-500 py-16">
+                    <p class="text-xl">Error loading spots. Please try again later.</p>
+                </div>`;
+                loadingIndicator.classList.add('hidden');
             });
+        };
 
-            filterContainer.addEventListener('click', (e) => {
-                if (e.target.matches('.filter-btn')) {
-                    document.querySelector('.filter-btn.active').classList.remove('active');
-                    e.target.classList.add('active');
-                    const category = e.target.dataset.category;
-                    renderSpots(category);
+        const renderSpots = (filter = 'All') => {
+            spotsGrid.innerHTML = '';
+            const filteredSpots = filter === 'All' ? spotsData : spotsData.filter(spot => spot.category === filter);
+
+            if (filteredSpots.length === 0) {
+                spotsGrid.innerHTML = `<div class="md:col-span-3 text-center text-gray-500 py-16">
+                    <p class="text-xl">No spots found for this category yet.</p>
+                    <p>Be the first to add one!</p>
+                </div>`;
+                return;
+            }
+
+            filteredSpots.forEach(spot => {
+                const card = document.createElement('div');
+                card.className = 'card rounded-lg shadow-sm p-6 flex flex-col';
+                card.innerHTML = `
+                    <div class="flex-grow">
+                        <span class="inline-block bg-gray-100 text-gray-700 text-xs font-semibold px-2.5 py-1 rounded-full mb-3">${spot.category}</span>
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">${spot.name}</h3>
+                        <p class="text-sm font-medium text-[#D48C70] mb-4">${spot.location}</p>
+                        <p class="text-gray-600 mb-4 leading-relaxed">"${spot.love}"</p>
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                            <strong class="font-semibold text-blue-800">Pro Tip:</strong>
+                            <span class="text-blue-700">${spot.tip}</span>
+                        </div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-gray-200 text-right space-x-2">
+                        <button data-id="${spot.id}" class="edit-btn text-xs text-indigo-600 hover:underline">Edit</button>
+                        <button data-id="${spot.id}" class="delete-btn text-xs text-red-600 hover:underline">Delete</button>
+                        <p class="text-xs text-gray-500 mt-2">Submitted by: <strong class="font-medium">${spot.submitter}</strong></p>
+                    </div>
+                `;
+                spotsGrid.appendChild(card);
+            });
+        };
+
+        const toggleModal = (show, mode = 'add', spot = null) => {
+            if (show) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                if (mode === 'edit' && spot) {
+                    modalTitle.textContent = 'Edit Your Spot';
+                    submitSpotBtn.textContent = 'Update Spot';
+                    document.getElementById('spot-name').value = spot.name;
+                    document.getElementById('spot-location').value = spot.location;
+                    document.getElementById('spot-category').value = spot.category;
+                    document.getElementById('spot-love').value = spot.love;
+                    document.getElementById('spot-tip').value = spot.tip;
+                    document.getElementById('spot-submitter').value = spot.submitter;
+                    editingSpotId = spot.id;
+                } else {
+                    modalTitle.textContent = 'Add Your Favorite Spot';
+                    submitSpotBtn.textContent = 'Submit Spot';
+                    spotForm.reset();
+                    editingSpotId = null;
                 }
-            });
+            } else {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                spotForm.reset();
+                editingSpotId = null;
+            }
+        };
+        
+        addSpotBtn.addEventListener('click', () => toggleModal(true, 'add'));
+        closeModalBtn.addEventListener('click', () => toggleModal(false));
+        modalBackdrop.addEventListener('click', () => toggleModal(false));
+        
+        spotForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(spotForm);
+            const spotData = {
+                name: formData.get('spotName'),
+                location: formData.get('spotLocation'),
+                category: formData.get('spotCategory'),
+                love: formData.get('spotLove'),
+                tip: formData.get('spotTip'),
+                submitter: formData.get('spotSubmitter'),
+                createdAt: new Date()
+            };
 
-            renderSpots();
+            try {
+                if (editingSpotId) {
+                    await updateDoc(doc(db, collectionPath, editingSpotId), spotData);
+                    console.log("Document updated with ID: ", editingSpotId);
+                } else {
+                    await addDoc(collection(db, collectionPath), spotData);
+                    console.log("Document added with ID: ", "New document");
+                }
+            } catch (error) {
+                console.error("Error adding/updating document: ", error);
+                // In a real app, you'd show a user-friendly error message here
+            } finally {
+                toggleModal(false);
+            }
         });
+
+        filterContainer.addEventListener('click', (e) => {
+            if (e.target.matches('.filter-btn')) {
+                document.querySelector('.filter-btn.active').classList.remove('active');
+                e.target.classList.add('active');
+                currentFilter = e.target.dataset.category;
+                renderSpots(currentFilter);
+            }
+        });
+
+        spotsGrid.addEventListener('click', async (e) => {
+            if (e.target.matches('.delete-btn')) {
+                const spotId = e.target.dataset.id;
+                if (spotId && confirm('Are you sure you want to delete this spot?')) { // Using confirm as a simple placeholder, replace with custom modal for production
+                    try {
+                        await deleteDoc(doc(db, collectionPath, spotId));
+                        console.log("Document successfully deleted!");
+                    } catch (error) {
+                        console.error("Error removing document: ", error);
+                    }
+                }
+            } else if (e.target.matches('.edit-btn')) {
+                const spotId = e.target.dataset.id;
+                const spotToEdit = spotsData.find(spot => spot.id === spotId);
+                if (spotToEdit) {
+                    toggleModal(true, 'edit', spotToEdit);
+                }
+            }
+        });
+
+        initializeFirebase();
     </script>
 </body>
 </html>
